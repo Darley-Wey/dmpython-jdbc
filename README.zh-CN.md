@@ -27,6 +27,8 @@ dependencies = [
 ]
 ```
 
+如果项目还依赖 `dmSQLAlchemy`，见 [配合 dmSQLAlchemy](#配合-dmsqlalchemy)。该包会无条件拉取官方 `dmpython`。
+
 从 GitHub 安装：
 
 ```bash
@@ -47,6 +49,38 @@ dmpython-jdbc = { git = "https://github.com/Darley-Wey/dmpython-jdbc.git" }
 - Python >= 3.12
 - JDK（macOS 可用 `brew install openjdk`）。`JAVA_HOME` 会自动探测 `/opt/homebrew/opt/openjdk` 和 `/usr/local/opt/openjdk`
 - 达梦 JDBC 驱动已打包进 wheel；也可用环境变量 `DM_JDBC_JAR` 覆盖
+
+
+## 配合 dmSQLAlchemy
+
+`dmSQLAlchemy` 无条件依赖官方 `dmpython`（`Requires-Dist: dmPython`）。该包没有 macOS wheel，所以在 Mac 上 `pip install dmSQLAlchemy` 会尝试装达梦官方驱动并失败。
+
+要保留 `dmSQLAlchemy`，又阻止解析器在 macOS 上装官方 `dmpython`，改装 `dmpython-jdbc`。import 名仍是 `dmPython`。
+
+### uv
+
+```toml
+[project]
+dependencies = [
+    "dmsqlalchemy",
+    "dmpython>=2.5.32; sys_platform != 'darwin'",
+    "dmpython-jdbc>=2.5.32; sys_platform == 'darwin'",
+]
+
+[tool.uv]
+override-dependencies = [
+    "dmpython ; sys_platform != 'darwin'",
+]
+```
+
+`override-dependencies` 会改写 `dmSQLAlchemy` 对 `dmpython` 的依赖，让它在 macOS 上被跳过；然后由 `dmpython-jdbc` 提供 `dmPython` 模块。
+
+### macOS 上的 pip
+
+```bash
+pip install "dmSQLAlchemy" --no-deps
+pip install "SQLAlchemy>1.4.54" dmpython-jdbc
+```
 
 ## 限制
 

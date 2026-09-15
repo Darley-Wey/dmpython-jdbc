@@ -27,6 +27,8 @@ dependencies = [
 ]
 ```
 
+If the project also depends on `dmSQLAlchemy`, see [Using with dmSQLAlchemy](#using-with-dmsqlalchemy). That package pulls official `dmpython` unconditionally.
+
 From GitHub:
 
 ```bash
@@ -47,6 +49,38 @@ Pin a commit or tag by appending `@<ref>`, for example `@main` or `@v2.5.32`.
 - Python >= 3.12
 - JDK (`brew install openjdk` on macOS). `JAVA_HOME` is probed at `/opt/homebrew/opt/openjdk` and `/usr/local/opt/openjdk`
 - The Dameng JDBC driver is bundled in the wheel; override it with `DM_JDBC_JAR`
+
+
+## Using with dmSQLAlchemy
+
+`dmSQLAlchemy` unconditionally depends on official `dmpython` (`Requires-Dist: dmPython`). That package has no macOS wheel, so `pip install dmSQLAlchemy` on a Mac will try to install Dameng's driver and fail.
+
+Keep `dmSQLAlchemy`, prevent the resolver from installing official `dmpython` on macOS, and install `dmpython-jdbc` instead. The import name stays `dmPython`.
+
+### uv
+
+```toml
+[project]
+dependencies = [
+    "dmsqlalchemy",
+    "dmpython>=2.5.32; sys_platform != 'darwin'",
+    "dmpython-jdbc>=2.5.32; sys_platform == 'darwin'",
+]
+
+[tool.uv]
+override-dependencies = [
+    "dmpython ; sys_platform != 'darwin'",
+]
+```
+
+`override-dependencies` rewrites `dmSQLAlchemy`'s `dmpython` requirement so it is skipped on macOS. `dmpython-jdbc` then provides the `dmPython` module.
+
+### pip on macOS
+
+```bash
+pip install "dmSQLAlchemy" --no-deps
+pip install "SQLAlchemy>1.4.54" dmpython-jdbc
+```
 
 ## Limits
 
