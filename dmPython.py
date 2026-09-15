@@ -1,5 +1,7 @@
 """Pick the official Dameng driver or the macOS JDBC shim."""
 
+import _dmpython_metadata  # noqa: F401
+
 import importlib.machinery
 import importlib.util
 import sys

@@ -4,3 +4,5 @@ include LICENSE
 include NOTICE
 include pyproject.toml
 recursive-include _dmPython_jdbc *.jar
+recursive-include dmpython-2.5.32.dist-info *
+include setup.py

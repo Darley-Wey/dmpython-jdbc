@@ -75,6 +75,8 @@ override-dependencies = [
 
 `override-dependencies` 会改写 `dmSQLAlchemy` 对 `dmpython` 的依赖，让它在 macOS 上被跳过；然后由 `dmpython-jdbc` 提供 `dmPython` 模块。
 
+`dmSQLAlchemy.extensions` 会调用 `importlib.metadata.version("dmPython")`。本包会安装 `.pth` 钩子，让这次查询返回 shim 版本 `2.5.32`，不依赖 setuptools/`pkg_resources`。
+
 ### macOS 上的 pip
 
 ```bash

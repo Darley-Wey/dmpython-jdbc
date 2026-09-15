@@ -4,7 +4,7 @@ requires-python = ">=3.12"
 
 [[package]]
 name = "dmpython-jdbc"
-version = "2.5.32"
+version = "2.5.32.post1"
 source = { editable = "." }
 dependencies = [
     { name = "jaydebeapi" },
