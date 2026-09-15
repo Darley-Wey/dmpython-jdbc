@@ -1,0 +1,12 @@
+[build-system]
+requires = ["setuptools>=83.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dmpython"
+version = "2.5.32"
+description = "macOS dmPython compatibility shim backed by JayDeBeApi"
+requires-python = ">=3.12"
+
+[tool.setuptools]
+py-modules = ["dmPython", "_dmPython_jdbc"]

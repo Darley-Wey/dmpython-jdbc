@@ -1,0 +1,27 @@
+"""按平台选择达梦官方驱动或 macOS JDBC 兼容实现。"""
+
+import importlib.machinery
+import importlib.util
+import sys
+from pathlib import Path
+
+
+if sys.platform == "darwin":
+    from _dmPython_jdbc import *  # noqa: F403
+else:
+    shim_dir = Path(__file__).resolve().parent
+    search_paths = [
+        path
+        for path in sys.path
+        if Path(path or ".").resolve() != shim_dir
+    ]
+    spec = importlib.machinery.PathFinder.find_spec(__name__, search_paths)
+    if spec is None or spec.loader is None:
+        raise ImportError(
+            "当前平台需要安装达梦官方 dmPython 驱动，但未在虚拟环境中找到"
+        )
+
+    native_module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(native_module)
+    sys.modules[__name__] = native_module
+    globals().update(native_module.__dict__)
