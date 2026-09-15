@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+include NOTICE
+include pyproject.toml
+recursive-include _dmPython_jdbc *.jar

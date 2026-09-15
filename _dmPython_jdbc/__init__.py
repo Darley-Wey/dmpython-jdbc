@@ -6,9 +6,9 @@ dmPython 兼容 shim（仅 macOS 本地开发用）。
 让 dmSQLAlchemy 的 `dm+dmPython://` 方言在 mac 上可用。
 
 依赖:
-  - uv pip install jaydebeapi          (jpype1 会一并安装)
+  - pip/uv 安装本包时会自动拉 JayDeBeApi（jpype1 会一并安装）
   - brew install openjdk               (JAVA_HOME 自动探测 /opt/homebrew/opt/openjdk)
-  - 达梦 JDBC 驱动 jar, 默认 libs/DmJdbcDriver18-*.jar, 可用环境变量 DM_JDBC_JAR 覆盖
+  - 达梦 JDBC 驱动 jar 已随包发布；可用环境变量 DM_JDBC_JAR 覆盖
 
 限制: 不支持存储过程出参(cursor.var)、LOB 流式读写等高级特性, 满足 ORM CRUD 即可。
 """
@@ -92,7 +92,10 @@ def _find_jar():
     if jar and os.path.exists(jar):
         return jar
     here = os.path.dirname(os.path.abspath(__file__))
-    for base in (here, os.path.dirname(here), os.getcwd()):
+    packaged = sorted(glob.glob(os.path.join(here, "DmJdbcDriver*.jar")))
+    if packaged:
+        return packaged[-1]
+    for base in (os.path.dirname(here), os.getcwd()):
         hits = sorted(glob.glob(os.path.join(base, "libs", "DmJdbcDriver*.jar"))) \
             or sorted(glob.glob(os.path.join(base, "DmJdbcDriver*.jar")))
         if hits:

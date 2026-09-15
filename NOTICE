@@ -1,0 +1,7 @@
+This project redistributes the Dameng JDBC driver:
+
+    _dmPython_jdbc/DmJdbcDriver18-*.jar
+
+That JAR is copyright 达梦数据库有限公司 (Dameng). It is included for
+convenience so `pip install dmpython-jdbc` works on macOS without a separate
+driver download. It is not licensed under the MIT license of this repository.

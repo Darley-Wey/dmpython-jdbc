@@ -3,10 +3,39 @@ requires = ["setuptools>=83.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "dmpython"
+name = "dmpython-jdbc"
 version = "2.5.32"
 description = "macOS dmPython compatibility shim backed by JayDeBeApi"
+readme = "README.md"
 requires-python = ">=3.12"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Darley", email = "darley.wey@gmail.com" },
+]
+keywords = ["dameng", "dmPython", "jdbc", "macos"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Database",
+]
+dependencies = [
+    "JayDeBeApi>=1.2.3",
+]
+
+[project.urls]
+Homepage = "https://github.com/Darley-Wey/dmpython-jdbc"
+Repository = "https://github.com/Darley-Wey/dmpython-jdbc"
+Issues = "https://github.com/Darley-Wey/dmpython-jdbc/issues"
 
 [tool.setuptools]
-py-modules = ["dmPython", "_dmPython_jdbc"]
+py-modules = ["dmPython"]
+packages = ["_dmPython_jdbc"]
+include-package-data = true
+
+[tool.setuptools.package-data]
+_dmPython_jdbc = ["*.jar"]
