@@ -1,21 +1,23 @@
 # dmpython-jdbc
 
-macOS 上的达梦 `dmPython` 兼容层。官方驱动没有 macOS 版，这里用 JayDeBeApi + 达梦 JDBC 实现 DBAPI 子集，让 `dmSQLAlchemy` 的 `dm+dmPython://` 方言能在本机跑起来。
+[English](README.md) | [简体中文](README.zh-CN.md)
 
-**发行名是 `dmpython-jdbc`，import 名仍是 `dmPython`。** 业务代码不用改。
+macOS compatibility layer for Dameng `dmPython`. Dameng does not ship a macOS driver, so this package implements a DBAPI subset with JayDeBeApi + Dameng JDBC and makes dmSQLAlchemy's `dm+dmPython://` dialect work locally.
 
-- macOS：使用本包的 JDBC shim
-- 其它平台：把 `import dmPython` 转发给已安装的官方驱动
+**The distribution name is `dmpython-jdbc`; the import name remains `dmPython`.** Application code does not need to change.
 
-## 安装
+- macOS: use this package's JDBC shim
+- Other platforms: forward `import dmPython` to the official driver
 
-PyPI：
+## Install
+
+PyPI:
 
 ```bash
 pip install dmpython-jdbc
 ```
 
-跨平台项目（Linux/Windows 用官方驱动，macOS 用本包）：
+Cross-platform projects (official driver on Linux/Windows, this package on macOS):
 
 ```toml
 [project]
@@ -25,31 +27,31 @@ dependencies = [
 ]
 ```
 
-从 GitHub 安装：
+From GitHub:
 
 ```bash
 pip install "dmpython-jdbc @ git+https://github.com/Darley-Wey/dmpython-jdbc.git"
 ```
 
-uv：
+uv:
 
 ```toml
 [tool.uv.sources]
 dmpython-jdbc = { git = "https://github.com/Darley-Wey/dmpython-jdbc.git" }
 ```
 
-需要钉到某个提交或 tag 时，在 URL 后加 `@<ref>`，例如 `@main` 或 `@v2.5.32`。
+Pin a commit or tag by appending `@<ref>`, for example `@main` or `@v2.5.32`.
 
-## 运行依赖
+## Runtime requirements
 
 - Python >= 3.12
-- JDK（macOS 可用 `brew install openjdk`）。`JAVA_HOME` 会自动探测 `/opt/homebrew/opt/openjdk` 和 `/usr/local/opt/openjdk`
-- 达梦 JDBC 驱动已打包进 wheel；也可用环境变量 `DM_JDBC_JAR` 覆盖
+- JDK (`brew install openjdk` on macOS). `JAVA_HOME` is probed at `/opt/homebrew/opt/openjdk` and `/usr/local/opt/openjdk`
+- The Dameng JDBC driver is bundled in the wheel; override it with `DM_JDBC_JAR`
 
-## 限制
+## Limits
 
-不支持存储过程出参（`cursor.var`）、LOB 流式读写等高级特性，覆盖 ORM CRUD 即可。
+Stored-procedure OUT binds (`cursor.var`) and streaming LOB I/O are not supported. ORM CRUD is covered.
 
-## 许可证
+## License
 
-Python 兼容层使用 MIT。仓库中的 `DmJdbcDriver18-*.jar` 是达梦官方 JDBC 驱动，版权归达梦数据库所有，不受 MIT 覆盖。
+The Python shim is MIT. `DmJdbcDriver18-*.jar` is Dameng's official JDBC driver and is not covered by MIT.

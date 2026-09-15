@@ -1,16 +1,16 @@
 """
-dmPython 兼容 shim（仅 macOS 本地开发用）。
+dmPython-compatible shim for local macOS development.
 
-达梦官方没有 macOS 版 dmPython（缺少 libdmdpi 闭源库无法本地编译），
-本模块用 JayDeBeApi + DmJdbcDriver 实现 dmPython 的 DBAPI 子集，
-让 dmSQLAlchemy 的 `dm+dmPython://` 方言在 mac 上可用。
+Dameng does not ship a macOS dmPython build (libdmdpi is closed-source),
+so this module implements a DBAPI subset with JayDeBeApi + DmJdbcDriver
+and makes dmSQLAlchemy's `dm+dmPython://` dialect usable on Mac.
 
-依赖:
-  - pip/uv 安装本包时会自动拉 JayDeBeApi（jpype1 会一并安装）
-  - brew install openjdk               (JAVA_HOME 自动探测 /opt/homebrew/opt/openjdk)
-  - 达梦 JDBC 驱动 jar 已随包发布；可用环境变量 DM_JDBC_JAR 覆盖
+Dependencies:
+  - JayDeBeApi is installed with this package (JPype1 comes with it)
+  - brew install openjdk  (JAVA_HOME is probed at /opt/homebrew/opt/openjdk)
+  - Dameng JDBC driver JAR is packaged; override with DM_JDBC_JAR
 
-限制: 不支持存储过程出参(cursor.var)、LOB 流式读写等高级特性, 满足 ORM CRUD 即可。
+Limits: no cursor.var / OUT binds, no streaming LOB I/O. ORM CRUD is enough.
 """
 import datetime as _datetime
 import glob
@@ -18,13 +18,13 @@ import os
 import re
 import sys
 
-version = "2.5.32"  # 伪装成官方版本号, dmSQLAlchemy 会解析它
+version = "2.5.32"  # spoof the official version; dmSQLAlchemy parses it
 apilevel = "2.0"
 threadsafety = 1
-paramstyle = "qmark"  # 编译成 ? 占位符, 与 JDBC 原生一致; dialect do_execute 也按位置索引参数
+paramstyle = "qmark"  # compiled to JDBC `?`; dialect do_execute uses positional binds
 
 
-# ---------------------------------------------------------------- 异常体系
+# ---------------------------------------------------------------- exceptions
 class Warning(Exception): pass
 class Error(Exception): pass
 class InterfaceError(Error): pass
@@ -37,9 +37,9 @@ class ProgrammingError(DatabaseError): pass
 class NotSupportedError(DatabaseError): pass
 
 
-# ---------------------------------------------------------------- 类型哨兵
-# 官方 dmPython 中这些符号本身是类, dmSQLAlchemy 会拿来做 isinstance 判断
-# (如 isinstance(value, dialect.dbapi.LOB)), 所以必须是类而不是实例。
+# ---------------------------------------------------------------- type sentinels
+# Official dmPython exposes these as classes; dmSQLAlchemy uses isinstance
+# (e.g. isinstance(value, dialect.dbapi.LOB)), so they must be types, not instances.
 class _DBType:
     def __init__(self, name):
         self.name = name
@@ -78,7 +78,7 @@ TupleCursor = _make_type("TupleCursor")
 
 
 def _jdbc_timestamp_to_datetime(result_set, column):
-    """将 JDBC TIMESTAMP 转为与官方 dmPython 一致的 Python datetime。"""
+    """Convert a JDBC TIMESTAMP to the datetime shape official dmPython returns."""
     value = result_set.getTimestamp(column)
     if value is None:
         return None
@@ -100,7 +100,7 @@ def _find_jar():
             or sorted(glob.glob(os.path.join(base, "DmJdbcDriver*.jar")))
         if hits:
             return hits[-1]
-    raise InterfaceError("找不到达梦 JDBC 驱动 jar, 请设置环境变量 DM_JDBC_JAR")
+    raise InterfaceError("Dameng JDBC driver JAR not found; set DM_JDBC_JAR")
 
 
 def _ensure_java_home():
@@ -112,7 +112,7 @@ def _ensure_java_home():
             return
 
 
-# :name 占位符 → JDBC '?' 占位符。跳过字符串字面量与 :: 转换。
+# Rewrite :name binds to JDBC `?`, skipping string literals and `::` casts.
 _BIND_RE = re.compile(r"(?<![:\w]):([A-Za-z_][A-Za-z0-9_]*)")
 
 
@@ -123,12 +123,12 @@ def _named_to_qmark(sql):
     in_str = False
     i = 0
     buf = sql
-    # 简单状态机: 单引号字符串内不做替换
+    # Skip replacements inside single-quoted string literals.
     result = []
     last = 0
     for m in _BIND_RE.finditer(sql):
         seg = sql[last:m.start()]
-        # 统计该占位符之前未闭合的单引号数
+        # Odd number of quotes before this match means we are inside a string.
         if (sql[:m.start()].count("'") % 2) == 1:
             continue
         result.append(seg)
@@ -152,8 +152,9 @@ class Cursor:
         self._closed = False
 
     def _check_conn_open(self):
-        # dmSQLAlchemy.is_disconnect 只把 InterfaceError("not connected") 判成断线;
-        # 把 JDBC 的“连接尚未建立或已经关闭”映射成这一形态, 连接池才能自动丢弃旧连接并重建。
+        # dmSQLAlchemy.is_disconnect only treats InterfaceError("not connected")
+        # as a dropped connection. Map Dameng JDBC closed-connection errors to
+        # that shape so the pool can discard and reconnect.
         if self._closed or getattr(self._conn, "_closed", False):
             raise InterfaceError("not connected")
 
@@ -163,10 +164,10 @@ class Cursor:
         desc = self._cur.description
         if not desc:
             return desc
-        # jaydebeapi 用 getColumnName(底层列名)而非 getColumnLabel(SQL 别名),
-        # 会丢掉 `id as "tab_id"` 这类别名; 这里用 label 修正。
-        # 另: DM 服务端把未加引号的标识符统一大写返回, 官方 dmPython 返回小写,
-        # dmSQLAlchemy 反射代码按小写取列, 全大写时转小写保持一致。
+        # jaydebeapi uses getColumnName (physical name) instead of getColumnLabel
+        # (SQL alias), dropping aliases such as `id as "tab_id"`. Fix via label.
+        # Dameng also uppercases unquoted identifiers; official dmPython returns
+        # lowercase, and dmSQLAlchemy reflection looks up columns in lowercase.
         meta = getattr(self._cur, "_meta", None)
         names = []
         for i, d in enumerate(desc):
@@ -190,7 +191,7 @@ class Cursor:
             return operation, None
         if isinstance(parameters, (list, tuple)):
             return operation, list(parameters)
-        # dict → named 转 qmark
+        # dict -> named binds rewritten as qmark
         sql, names = _named_to_qmark(operation)
         return sql, [parameters.get(n) for n in names]
 
@@ -201,6 +202,7 @@ class Cursor:
             self._cur.execute(sql, params)
         except Exception as e:
             msg = str(e)
+            # Dameng JDBC uses these Chinese phrases for a closed connection.
             if "尚未建立" in msg or "已经关闭" in msg or "not connected" in msg.lower() or "connection closed" in msg.lower():
                 raise InterfaceError("not connected") from e
             raise DatabaseError(msg) from e
@@ -219,13 +221,14 @@ class Cursor:
             self._cur.executemany(sql, rows)
         except Exception as e:
             msg = str(e)
+            # Dameng JDBC uses these Chinese phrases for a closed connection.
             if "尚未建立" in msg or "已经关闭" in msg or "not connected" in msg.lower() or "connection closed" in msg.lower():
                 raise InterfaceError("not connected") from e
             raise DatabaseError(msg) from e
         return self
 
     def _capture_identity(self, sql):
-        # 仅 INSERT 后按需取自增值(get_lastrowid 会读取)
+        # Capture identity only after INSERT; lastrowid reads it lazily.
         self._lastrowid = None
         if re.match(r"\s*insert\b", sql, re.I):
             self._pending_identity = True
@@ -248,13 +251,13 @@ class Cursor:
         return self._lastrowid
 
     def _convert_row(self, row):
-        """jaydebeapi 把 CLOB/BLOB 列返回为 java.sql.Clob/Blob 对象,
-        官方 dmPython 返回 str/bytes, 这里统一转换避免 ORM 赋值时报错。"""
+        """jaydebeapi returns java.sql.Clob/Blob; official dmPython returns str/bytes.
+        Normalize so ORM assignment does not fail."""
         if row is None:
             return None
         items = []
         for v in row:
-            # jpype1 代理对象的类名形如 _jp_java.sql.Clob, 或是接口类型 java.sql.Clob
+            # JPype proxies look like _jp_java.sql.Clob or java.sql.Clob
             cls_name = type(v).__name__
             if not isinstance(v, (str, bytes, int, float, bool, type(None))):
                 try:
@@ -293,7 +296,7 @@ class Cursor:
         pass
 
     def var(self, *args, **kw):
-        raise NotSupportedError("JDBC shim 不支持 cursor.var/出参")
+        raise NotSupportedError("JDBC shim does not support cursor.var / OUT binds")
 
     def close(self):
         try:
@@ -323,8 +326,8 @@ class Connection:
         self.inputtypehandler = None
         self.autocommit = False
         self.server_version = "8.1.3.140"
-        self.current_schema = schema  # dmSQLAlchemy 取默认 schema 用
-        self.local_code = 1  # 1 = utf-8, dmSQLAlchemy 会读取
+        self.current_schema = schema  # dmSQLAlchemy reads the default schema here
+        self.local_code = 1  # 1 = utf-8; dmSQLAlchemy reads this
         self._closed = False
         try:
             cur = self._jconn.cursor()
@@ -378,8 +381,8 @@ class Connection:
 
 
 def _patch_dialect_no_returning():
-    """RETURNING 依赖 cursor.var 出参, JDBC shim 不支持;
-    关闭方言的 returning 能力, 让 SQLAlchemy 回退到 lastrowid 取自增主键。"""
+    """RETURNING needs cursor.var OUT binds, which this shim does not support.
+    Disable dialect returning so SQLAlchemy falls back to lastrowid."""
     mod = sys.modules.get("dmSQLAlchemy.dmpython")
     if mod is None:
         return
@@ -392,8 +395,9 @@ def _patch_dialect_no_returning():
     cls.insert_executemany_returning = False
     cls.favor_returning_over_lastrowid = False
 
-    # JDBC 的 SCOPE_IDENTITY() 返回单列自增主键值；dmSQLAlchemy 官方驱动
-    # 则将 lastrowid 视为物理 ROWID 再查询。为 JDBC shim 直接回填该主键值。
+    # JDBC SCOPE_IDENTITY() returns a single identity column value. Official
+    # dmSQLAlchemy treats lastrowid as a physical ROWID and queries it back.
+    # For this shim, fill the PK directly from that identity value.
     def _get_cols_from_lastrowid(self, table, primary_columns, lastrowid):
         if len(primary_columns) == 1:
             return (lastrowid,)
@@ -403,9 +407,9 @@ def _patch_dialect_no_returning():
 
     cls.execution_ctx_cls.get_cols_from_lastrowid = _get_cols_from_lastrowid
 
-    # 官方 do_executemany 会拼 `RETURNING ... INTO ?` 出参取回自增主键,
-    # JDBC 无此机制; 改为普通 executemany, 主键由服务端自增, ORM 批量插入
-    # 后如需主键请单条 add + flush。
+    # Official do_executemany appends `RETURNING ... INTO ?` to fetch identity.
+    # JDBC cannot do that; use plain executemany and let the server assign PKs.
+    # If the ORM needs those keys, insert one row at a time and flush.
     import datetime as _dt
     import json as _json
 
@@ -424,7 +428,7 @@ def _patch_dialect_no_returning():
 
 
 def connect(*args, **kw):
-    """兼容 dmPython.connect(user=..., password=..., dsn='host:port', schema=..., ...)"""
+    """Compatible with dmPython.connect(user=..., password=..., dsn='host:port', schema=..., ...)."""
     import jaydebeapi
 
     _patch_dialect_no_returning()
@@ -442,7 +446,7 @@ def connect(*args, **kw):
     if schema:
         props["schema"] = schema
     if kw.get("local_code") is not None:
-        pass  # 编码由 JDBC 自动处理
+        pass  # JDBC handles encoding
     if props:
         url += "?" + "&".join(f"{k}={v}" for k, v in props.items())
     try:
@@ -452,7 +456,7 @@ def connect(*args, **kw):
         timestamp_type = jaydebeapi._jdbc_name_to_const["TIMESTAMP"]
         jconn._converters[timestamp_type] = _jdbc_timestamp_to_datetime
     except Exception as e:
-        raise OperationalError(f"达梦 JDBC 连接失败: {e}") from e
+        raise OperationalError(f"Dameng JDBC connection failed: {e}") from e
     autocommit = kw.get("autoCommit", kw.get("autocommit", False))
     jconn.jconn.setAutoCommit(bool(autocommit))
     conn = Connection(jconn, schema=schema)
@@ -469,14 +473,14 @@ def connect(*args, **kw):
     return conn
 
 
-# dmSQLAlchemy 反射用到的可选符号, 提供占位实现
+# Optional symbols used by dmSQLAlchemy reflection; provide stubs.
 def parse_mysql_stmt(*a, **kw):
-    raise NotSupportedError("shim 不支持 parse_mysql_stmt")
+    raise NotSupportedError("shim does not support parse_mysql_stmt")
 
 
 def parse_tsql_stmt(*a, **kw):
-    raise NotSupportedError("shim 不支持 parse_tsql_stmt")
+    raise NotSupportedError("shim does not support parse_tsql_stmt")
 
 
-class objedctvar:  # dmSQLAlchemy 引用了这个拼写
+class objedctvar:  # dmSQLAlchemy uses this misspelling
     pass

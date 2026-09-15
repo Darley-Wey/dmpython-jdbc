@@ -1,4 +1,4 @@
-"""按平台选择达梦官方驱动或 macOS JDBC 兼容实现。"""
+"""Pick the official Dameng driver or the macOS JDBC shim."""
 
 import importlib.machinery
 import importlib.util
@@ -18,7 +18,8 @@ else:
     spec = importlib.machinery.PathFinder.find_spec(__name__, search_paths)
     if spec is None or spec.loader is None:
         raise ImportError(
-            "当前平台需要安装达梦官方 dmPython 驱动，但未在虚拟环境中找到"
+            "This platform requires the official Dameng dmPython driver, "
+            "which was not found on sys.path"
         )
 
     native_module = importlib.util.module_from_spec(spec)
