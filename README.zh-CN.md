@@ -32,8 +32,6 @@ dependencies = [
 从 Git 安装：
 
 ```bash
-pip install "dmpython-jdbc @ git+https://gitlab.nancalcloud.com/weidalei/dmpython-jdbc.git"
-# 或公开镜像：
 pip install "dmpython-jdbc @ git+https://github.com/Darley-Wey/dmpython-jdbc.git"
 ```
 
@@ -41,7 +39,7 @@ uv：
 
 ```toml
 [tool.uv.sources]
-dmpython-jdbc = { git = "https://gitlab.nancalcloud.com/weidalei/dmpython-jdbc.git" }
+dmpython-jdbc = { git = "https://github.com/Darley-Wey/dmpython-jdbc.git" }
 ```
 
 需要钉到某个提交或 tag 时，在 URL 后加 `@<ref>`，例如 `@main` 或 `@v2.5.32`。
