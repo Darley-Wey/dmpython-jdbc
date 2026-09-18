@@ -447,6 +447,14 @@ def connect(*args, **kw):
         props["schema"] = schema
     if kw.get("local_code") is not None:
         pass  # JDBC handles encoding
+    # Official dmPython: login_timeout is milliseconds, connection_timeout is seconds.
+    # JDBC uses different property names. Forward them here; unknown kwargs stay ignored.
+    login_timeout = kw.get("login_timeout")
+    if login_timeout is not None:
+        props["loginTimeout"] = max(1, int(round(int(login_timeout) / 1000)))
+    connection_timeout = kw.get("connection_timeout")
+    if connection_timeout is not None:
+        props["socketTimeout"] = int(connection_timeout) * 1000
     if props:
         url += "?" + "&".join(f"{k}={v}" for k, v in props.items())
     try:

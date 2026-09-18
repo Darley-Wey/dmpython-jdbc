@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "dmpython-jdbc"
-version = "2.5.32.post1"
+version = "2.5.32.post2"
 description = "macOS dmPython compatibility shim backed by JayDeBeApi"
 readme = "README.md"
 requires-python = ">=3.12"

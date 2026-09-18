@@ -29,9 +29,11 @@ dependencies = [
 
 If the project also depends on `dmSQLAlchemy`, see [Using with dmSQLAlchemy](#using-with-dmsqlalchemy). That package pulls official `dmpython` unconditionally.
 
-From GitHub:
+From Git:
 
 ```bash
+pip install "dmpython-jdbc @ git+https://gitlab.nancalcloud.com/weidalei/dmpython-jdbc.git"
+# or the public mirror:
 pip install "dmpython-jdbc @ git+https://github.com/Darley-Wey/dmpython-jdbc.git"
 ```
 
@@ -39,7 +41,7 @@ uv:
 
 ```toml
 [tool.uv.sources]
-dmpython-jdbc = { git = "https://github.com/Darley-Wey/dmpython-jdbc.git" }
+dmpython-jdbc = { git = "https://gitlab.nancalcloud.com/weidalei/dmpython-jdbc.git" }
 ```
 
 Pin a commit or tag by appending `@<ref>`, for example `@main` or `@v2.5.32`.
