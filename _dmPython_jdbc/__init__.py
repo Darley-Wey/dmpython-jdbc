@@ -13,10 +13,12 @@ Dependencies:
 Limits: no cursor.var / OUT binds, no streaming LOB I/O. ORM CRUD is enough.
 """
 import datetime as _datetime
+from functools import wraps as _wraps
 import glob
 import os
 import re
 import sys
+from threading import RLock as _RLock
 
 version = "2.5.32"  # spoof the official version; dmSQLAlchemy parses it
 apilevel = "2.0"
@@ -87,6 +89,20 @@ def _jdbc_timestamp_to_datetime(result_set, column):
     return parsed.replace(microsecond=int(value.getNanos()) // 1000)
 
 
+def _jdbc_binary_to_bytes(result_set, column):
+    """Preserve binary column contents rather than stringifying a Java array."""
+    value = result_set.getBytes(column)
+    return None if value is None else bytes(value)
+
+
+def _jdbc_parameter(value):
+    # setObject otherwise selects a string conversion for Python bytes.
+    if isinstance(value, (bytes, bytearray, memoryview)):
+        import jaydebeapi
+        return jaydebeapi.Binary(bytes(value))
+    return value
+
+
 def _find_jar():
     jar = os.environ.get("DM_JDBC_JAR")
     if jar and os.path.exists(jar):
@@ -139,11 +155,24 @@ def _named_to_qmark(sql):
     return "".join(result), names
 
 
+def _serialized(method):
+    """Serialize JDBC access across dmAsync's worker threads per connection."""
+    @_wraps(method)
+    def locked(self, *args, **kwargs):
+        with self._lock:
+            return method(self, *args, **kwargs)
+    return locked
+
+
 class Cursor:
     def __init__(self, jcur, conn):
         self._cur = jcur
         self._conn = conn
+        self._lock = conn._lock
         self.arraysize = 50
+        self.name = None  # Unnamed, forward-only cursor.
+        self._statement = None
+        self._rownumber = -1
         self.outputtypehandler = None
         self.inputtypehandler = None
         self.output_stream = 0
@@ -155,12 +184,51 @@ class Cursor:
         # dmSQLAlchemy.is_disconnect only treats InterfaceError("not connected")
         # as a dropped connection. Map Dameng JDBC closed-connection errors to
         # that shape so the pool can discard and reconnect.
-        if self._closed or getattr(self._conn, "_closed", False):
+        if self._closed:
             raise InterfaceError("not connected")
+        self._conn._check_open()
+
+    @property
+    def connection(self):
+        return self._conn
+
+    @property
+    def closed(self):
+        return self._closed or self._conn.closed
+
+    @property
+    def query(self):
+        return self._statement
+
+    statement = query
+
+    @property
+    def rownumber(self):
+        return self._rownumber
+
+    @property
+    def scrollable(self):
+        return False
+
+    @scrollable.setter
+    def scrollable(self, value):
+        if value:
+            raise NotSupportedError("JDBC shim only supports forward-only cursors")
+
+    @property
+    def withhold(self):
+        return False
+
+    @withhold.setter
+    def withhold(self, value):
+        if value:
+            raise NotSupportedError("JDBC shim does not support holdable cursors")
 
     # -- DBAPI --
     @property
+    @_serialized
     def description(self):
+        self._check_conn_open()
         desc = self._cur.description
         if not desc:
             return desc
@@ -183,21 +251,26 @@ class Cursor:
         return [(names[i],) + tuple(d[1:]) for i, d in enumerate(desc)]
 
     @property
+    @_serialized
     def rowcount(self):
+        self._check_conn_open()
         return self._cur.rowcount
 
     def _prepare(self, operation, parameters):
         if parameters is None:
             return operation, None
         if isinstance(parameters, (list, tuple)):
-            return operation, list(parameters)
+            return operation, [_jdbc_parameter(value) for value in parameters]
         # dict -> named binds rewritten as qmark
         sql, names = _named_to_qmark(operation)
-        return sql, [parameters.get(n) for n in names]
+        return sql, [_jdbc_parameter(parameters.get(n)) for n in names]
 
+    @_serialized
     def execute(self, operation, parameters=None, **kw):
         self._check_conn_open()
         sql, params = self._prepare(operation, parameters)
+        self._statement = operation
+        self._rownumber = -1
         try:
             self._cur.execute(sql, params)
         except Exception as e:
@@ -207,16 +280,22 @@ class Cursor:
                 raise InterfaceError("not connected") from e
             raise DatabaseError(msg) from e
         self._capture_identity(sql)
+        self._rownumber = 0 if self._cur.description else -1
         return self
 
+    @_serialized
     def executemany(self, operation, seq_of_parameters, **kw):
         self._check_conn_open()
+        self._statement = operation
+        self._rownumber = -1
+        self._lastrowid = None
+        self._pending_identity = False
         first = seq_of_parameters[0] if seq_of_parameters else None
         if isinstance(first, dict):
             sql, names = _named_to_qmark(operation)
-            rows = [[p.get(n) for n in names] for p in seq_of_parameters]
+            rows = [[_jdbc_parameter(p.get(n)) for n in names] for p in seq_of_parameters]
         else:
-            sql, rows = operation, [list(p) for p in seq_of_parameters]
+            sql, rows = operation, [[_jdbc_parameter(v) for v in p] for p in seq_of_parameters]
         try:
             self._cur.executemany(sql, rows)
         except Exception as e:
@@ -236,7 +315,9 @@ class Cursor:
             self._pending_identity = False
 
     @property
+    @_serialized
     def lastrowid(self):
+        self._check_conn_open()
         if getattr(self, "_pending_identity", False):
             c = self._conn._jconn.cursor()
             try:
@@ -280,14 +361,52 @@ class Cursor:
             items.append(v)
         return tuple(items)
 
+    @_serialized
     def fetchone(self):
-        return self._convert_row(self._cur.fetchone())
+        self._check_conn_open()
+        row = self._convert_row(self._cur.fetchone())
+        if row is not None:
+            self._rownumber += 1
+        return row
 
+    next = fetchone
+
+    @_serialized
     def fetchmany(self, size=None):
-        return [self._convert_row(r) for r in self._cur.fetchmany(size or self.arraysize)]
+        self._check_conn_open()
+        rows = [self._convert_row(r) for r in self._cur.fetchmany(
+            self.arraysize if size is None else size
+        )]
+        self._rownumber += len(rows)
+        return rows
 
+    @_serialized
     def fetchall(self):
-        return [self._convert_row(r) for r in self._cur.fetchall()]
+        self._check_conn_open()
+        rows = [self._convert_row(r) for r in self._cur.fetchall()]
+        self._rownumber += len(rows)
+        return rows
+
+    def executedirect(self, operation):
+        return self.execute(operation)
+
+    def callproc(self, *args, **kwargs):
+        raise NotSupportedError("JDBC shim does not support callproc")
+
+    def callfunc(self, *args, **kwargs):
+        raise NotSupportedError("JDBC shim does not support callfunc")
+
+    def prepare(self, *args, **kwargs):
+        raise NotSupportedError("JDBC shim does not support explicit prepare")
+
+    def mogrify(self, *args, **kwargs):
+        raise NotSupportedError("JDBC shim does not support mogrify")
+
+    def nextset(self):
+        raise NotSupportedError("JDBC shim does not support multiple result sets")
+
+    def scroll(self, *args, **kwargs):
+        raise NotSupportedError("JDBC shim only supports forward-only cursors")
 
     def setinputsizes(self, *args, **kw):
         pass
@@ -298,7 +417,10 @@ class Cursor:
     def var(self, *args, **kw):
         raise NotSupportedError("JDBC shim does not support cursor.var / OUT binds")
 
+    @_serialized
     def close(self):
+        if self._closed:
+            return
         try:
             self._cur.close()
         except Exception:
@@ -322,34 +444,88 @@ class Cursor:
 class Connection:
     def __init__(self, jconn, schema=None):
         self._jconn = jconn
+        self._lock = _RLock()
         self.outputtypehandler = None
         self.inputtypehandler = None
-        self.autocommit = False
         self.server_version = "8.1.3.140"
+        self.max_identifier_length = None
         self.current_schema = schema  # dmSQLAlchemy reads the default schema here
         self.local_code = 1  # 1 = utf-8; dmSQLAlchemy reads this
         self._closed = False
         try:
+            metadata = self._jconn.jconn.getMetaData()
+            self.server_version = str(metadata.getDatabaseProductVersion())
+            lengths = [int(metadata.getMaxColumnNameLength()),
+                       int(metadata.getMaxTableNameLength())]
+            self.max_identifier_length = min((n for n in lengths if n > 0), default=None)
+        except Exception:
+            # Retain legacy version fallback if the driver cannot provide metadata.
+            pass
+        try:
             cur = self._jconn.cursor()
-            cur.execute("SELECT CASE_SENSITIVE()")
-            row = cur.fetchone()
-            cur.close()
+            try:
+                cur.execute("SELECT CASE_SENSITIVE()")
+                row = cur.fetchone()
+            finally:
+                cur.close()
             self.str_case_sensitive = bool(row and row[0] in (1, 'Y', 'y', True))
         except Exception:
             self.str_case_sensitive = True
 
+    @property
+    def version(self):
+        """Server version consumed by dmAsync (not the Python package version)."""
+        return self.server_version
+
+    @property
+    def stmtcachesize(self):
+        """The shim does not maintain a Python statement cache."""
+        return 0
+
+    @stmtcachesize.setter
+    def stmtcachesize(self, value):
+        if value != 0:
+            raise NotSupportedError("JDBC shim does not support a Python statement cache")
+
+    @property
+    @_serialized
+    def closed(self):
+        return self._closed or bool(self._jconn.jconn.isClosed())
+
+    @property
+    def status(self):
+        """Shim liveness: 1 while open, 0 when closed; not a DPI transaction code."""
+        return int(not self.closed)
+
+    @property
+    @_serialized
+    def autocommit(self):
+        self._check_open()
+        return bool(self._jconn.jconn.getAutoCommit())
+
+    @autocommit.setter
+    @_serialized
+    def autocommit(self, value):
+        self._check_open()
+        self._jconn.jconn.setAutoCommit(bool(value))
+
+    autoCommit = autocommit
+
     def _check_open(self):
-        if self._closed:
+        if self.closed:
             raise InterfaceError("not connected")
 
+    @_serialized
     def cursor(self, *args, **kw):
         self._check_open()
         return Cursor(self._jconn.cursor(), self)
 
+    @_serialized
     def commit(self):
         self._check_open()
         self._jconn.commit()
 
+    @_serialized
     def rollback(self):
         if self._closed:
             return
@@ -358,13 +534,17 @@ class Connection:
         except Exception:
             pass
 
+    @_serialized
     def close(self):
+        if self._closed:
+            return
         try:
             self._jconn.close()
         except Exception:
             pass
         self._closed = True
 
+    @_serialized
     def ping(self, *a, **kw):
         cur = self.cursor()
         try:
@@ -461,8 +641,17 @@ def connect(*args, **kw):
         jconn = jaydebeapi.connect(
             "dm.jdbc.driver.DmDriver", url, [user, password], _find_jar()
         )
-        timestamp_type = jaydebeapi._jdbc_name_to_const["TIMESTAMP"]
-        jconn._converters[timestamp_type] = _jdbc_timestamp_to_datetime
+        # JayDeBeApi shares its default converter dictionary across connections.
+        jconn._converters = jconn._converters.copy()
+        for name, converter in (
+            ("TIMESTAMP", _jdbc_timestamp_to_datetime),
+            ("BINARY", _jdbc_binary_to_bytes),
+            ("VARBINARY", _jdbc_binary_to_bytes),
+            ("LONGVARBINARY", _jdbc_binary_to_bytes),
+        ):
+            type_code = jaydebeapi._jdbc_name_to_const.get(name)
+            if type_code is not None:
+                jconn._converters[type_code] = converter
     except Exception as e:
         raise OperationalError(f"Dameng JDBC connection failed: {e}") from e
     autocommit = kw.get("autoCommit", kw.get("autocommit", False))
@@ -477,7 +666,6 @@ def connect(*args, **kw):
             conn.current_schema = row[0] if row else user
         except Exception:
             conn.current_schema = user
-    conn.autocommit = bool(autocommit)
     return conn
 
 
