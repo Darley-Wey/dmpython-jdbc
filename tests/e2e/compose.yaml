@@ -1,0 +1,38 @@
+name: dmpython-e2e
+
+services:
+  dameng:
+    image: ${DM_E2E_IMAGE:?Set DM_E2E_IMAGE to your licensed DM8 image}
+    container_name: dmpython-e2e-db
+    entrypoint: ["/bin/bash", "/e2e/start-dm.sh"]
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:25236:5236"
+    environment:
+      LD_LIBRARY_PATH: /opt/dmdbms/bin
+    volumes:
+      - data:/var/lib/dmpython-e2e
+      - ./start-dm.sh:/e2e/start-dm.sh:ro
+      - ./healthcheck.sh:/e2e/healthcheck.sh:ro
+    secrets:
+      - sysdba_password
+      - sysauditor_password
+    mem_limit: 2g
+    cpus: 2
+    stop_grace_period: 60s
+    healthcheck:
+      test: ["CMD", "bash", "/e2e/healthcheck.sh"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
+
+volumes:
+  data:
+    name: dmpython-e2e-data
+
+secrets:
+  sysdba_password:
+    file: ./secrets/sysdba_password.txt
+  sysauditor_password:
+    file: ./secrets/sysauditor_password.txt

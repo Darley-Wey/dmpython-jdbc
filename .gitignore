@@ -231,6 +231,10 @@ celerybeat.pid
 
 # Environments
 .env
+.env.e2e
+.venv-e2e/
+tests/e2e/secrets/
+tests/e2e/reports/
 .venv
 env/
 venv/
