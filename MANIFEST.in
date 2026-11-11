@@ -7,6 +7,6 @@ recursive-include _dmPython_jdbc *.jar
 recursive-include dmpython-2.5.32.dist-info *
 include setup.py
 recursive-include tests *.py
-include tests/e2e/compose.yaml tests/e2e/start-dm.sh tests/e2e/expose-port.ps1
+include tests/e2e/compose.yaml tests/e2e/start-dm.sh
 include tests/e2e/healthcheck.sh
 include tests/e2e/test.sh tests/e2e/.env.example tests/e2e/README.md
