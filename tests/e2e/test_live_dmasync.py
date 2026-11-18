@@ -181,6 +181,38 @@ class LiveDmAsyncTests(unittest.IsolatedAsyncioTestCase):
         finally:
             await cur.close()
 
+    async def test_auto_increment_value(self):
+        table = await self.table("ID BIGINT AUTO_INCREMENT PRIMARY KEY, NAME VARCHAR(128)")
+        cur = await self.conn.cursor()
+        try:
+            await cur.execute(f'INSERT INTO "{table}" (NAME) VALUES (?)', ["auto"])
+            self.assertEqual(cur.lastrowid, await self.scalar(self.conn, f'SELECT ID FROM "{table}"'))
+            await cur.execute(f'INSERT INTO "{table}" (NAME) VALUES (?), (?)', ["two", "three"])
+            self.assertEqual(cur.lastrowid, await self.scalar(self.conn, f'SELECT MAX(ID) FROM "{table}"'))
+        finally:
+            await cur.close()
+
+    async def test_generated_key_belongs_to_its_own_insert(self):
+        identity = await self.table("ID INTEGER IDENTITY(100,1) PRIMARY KEY, NAME VARCHAR(128)")
+        auto = await self.table("ID BIGINT AUTO_INCREMENT PRIMARY KEY, NAME VARCHAR(128)")
+        plain = await self.table()
+        cur = await self.conn.cursor()
+        try:
+            await cur.execute(f'INSERT INTO "{identity}" (NAME) VALUES (?)', ["identity"])
+            self.assertEqual(cur.lastrowid, 100)
+            # The server-side identity functions still report 100 from here on.
+            await cur.execute(f'INSERT INTO "{auto}" (NAME) VALUES (?)', ["auto"])
+            self.assertEqual(cur.lastrowid, 1)
+            await cur.execute(f'INSERT INTO "{plain}" VALUES (?, ?)', [7, "no generated key"])
+            self.assertIsNone(cur.lastrowid)
+            await cur.execute(f'INSERT INTO "{identity}" (NAME) VALUES (?)', ["identity"])
+            self.assertEqual(cur.lastrowid, 101)
+            await cur.execute(f'UPDATE "{identity}" SET NAME=? WHERE ID=?', ["updated", 101])
+            self.assertIsNone(cur.lastrowid)
+            self.assertEqual(cur.rowcount, 1)
+        finally:
+            await cur.close()
+
     async def test_binary_batch_and_named_bindings(self):
         table = await self.table("ID INTEGER PRIMARY KEY, PAYLOAD VARBINARY(1024)")
         values = [bytes(range(256)), b"\x00\xff\x80", b"abc\x00def", None]

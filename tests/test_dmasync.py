@@ -91,10 +91,7 @@ class SQLiteCursor:
         return self.cursor.rowcount
 
     def execute(self, sql, parameters=None):
-        sql = {
-            "SELECT CASE_SENSITIVE()": "SELECT 1",
-            "SELECT SCOPE_IDENTITY()": "SELECT last_insert_rowid()",
-        }.get(sql, sql)
+        sql = {"SELECT CASE_SENSITIVE()": "SELECT 1"}.get(sql, sql)
         with self.connection.access():
             self.cursor.execute(sql, parameters or ())
 
@@ -304,6 +301,83 @@ class DmAsyncTests(unittest.IsolatedAsyncioTestCase):
         metadata.getMaxColumnNameLength.return_value = 0
         metadata.getMaxTableNameLength.return_value = 0
         self.assertIsNone(shim.Connection(backend).max_identifier_length)
+
+
+def generated_keys(label, values):
+    keys = Mock()
+    keys.getMetaData.return_value.getColumnLabel.return_value = label
+    keys.next.side_effect = [True] * len(values) + [False]
+    keys.getLong.side_effect = list(values)
+    return keys
+
+
+class GeneratedKeyTests(unittest.TestCase):
+    """lastrowid comes from the INSERT's own JDBC generated keys.
+
+    The result-set shapes are the ones DM JDBC 8.1.3.140 returns; the live
+    suite checks them against a real server.
+    """
+
+    def test_reads_the_last_generated_key(self):
+        for values, expected in [([7], 7), ([4, 5], 5), ([], None)]:
+            with self.subTest(values=values):
+                prepared = Mock()
+                prepared.getGeneratedKeys.return_value = keys = generated_keys("AUTO_GEN_KEY", values)
+                self.assertEqual(shim._generated_key(prepared), expected)
+                keys.close.assert_called_once_with()
+
+    def test_placeholder_rowid_is_not_a_key(self):
+        prepared = Mock()
+        prepared.getGeneratedKeys.return_value = generated_keys("ROWID", [0])
+        self.assertIsNone(shim._generated_key(prepared))
+
+    def test_unavailable_keys_are_not_an_error(self):
+        prepared = Mock()
+        prepared.getGeneratedKeys.side_effect = RuntimeError("driver refused")
+        self.assertIsNone(shim._generated_key(prepared))
+        self.assertIsNone(shim._generated_key(None))
+
+    def cursor(self):
+        """A shim cursor over the real jaydebeapi cursor and a mocked JDBC connection."""
+        import jaydebeapi
+
+        jconn = Mock()
+        prepared = jconn.prepareStatement.return_value
+        prepared.execute.return_value = False
+        prepared.getUpdateCount.return_value = 1
+        prepared.getGeneratedKeys.side_effect = lambda: generated_keys("AUTO_GEN_KEY", [41])
+        jdbc = jaydebeapi.Connection(jconn, {})
+        connection = Mock(_lock=threading.RLock(), _jconn=jdbc, closed=False)
+        return shim.Cursor(jdbc.cursor(), connection), jdbc, jconn
+
+    def test_only_single_inserts_ask_the_driver_for_keys(self):
+        cursor, jdbc, jconn = self.cursor()
+        cursor.execute("INSERT INTO items (name) VALUES (?)", ["one"])
+        jconn.prepareStatement.assert_called_once_with("INSERT INTO items (name) VALUES (?)", 1)
+        self.assertEqual(cursor.lastrowid, 41)
+        self.assertEqual(cursor.rowcount, 1)
+        self.assertIs(jdbc.jconn, jconn)
+
+        cursor.execute("UPDATE items SET name=? WHERE id=?", ["two", 41])
+        jconn.prepareStatement.assert_called_with("UPDATE items SET name=? WHERE id=?")
+        self.assertIsNone(cursor.lastrowid)
+
+        cursor.execute("  insert into items (name) values (:name)", {"name": "three"})
+        self.assertEqual(cursor.lastrowid, 41)
+        jconn.prepareStatement.return_value.executeBatch.return_value = [1, 1]
+        cursor.executemany("INSERT INTO items (name) VALUES (?)", [("a",), ("b",)])
+        jconn.prepareStatement.assert_called_with("INSERT INTO items (name) VALUES (?)")
+        self.assertIsNone(cursor.lastrowid)
+
+    def test_failed_insert_restores_the_jdbc_connection(self):
+        backend = SQLiteJDBC()
+        self.addCleanup(backend.close)
+        original = backend.jconn
+        cursor = shim.Connection(backend).cursor()
+        with self.assertRaises(shim.DatabaseError):
+            cursor.execute("INSERT INTO missing VALUES (1)")
+        self.assertIs(backend.jconn, original)
+        self.assertIsNone(cursor.lastrowid)
 
 
 if __name__ == "__main__":
