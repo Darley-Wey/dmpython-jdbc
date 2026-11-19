@@ -29,7 +29,7 @@ class LiveDmAsyncTests(unittest.IsolatedAsyncioTestCase):
             schema=os.environ["DM_E2E_SCHEMA"], login_timeout=5000, connection_timeout=30,
         )
         # This must be the installed public import, not a sys.modules test double.
-        if dmAsync.connection.dmPython is not dmPython or dmPython.connect.__module__ != "_dmPython_jdbc":
+        if dmAsync.connection.dmPython is not dmPython or dmPython.connect.__module__.partition(".")[0] != "_dmPython_jdbc":
             raise RuntimeError("E2E tests did not load the real dmPython JDBC shim")
 
     async def asyncSetUp(self):

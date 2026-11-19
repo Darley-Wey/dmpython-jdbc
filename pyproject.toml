@@ -34,7 +34,7 @@ Issues = "https://github.com/Darley-Wey/dmpython-jdbc/issues"
 
 [tool.setuptools]
 py-modules = ["dmPython", "_dmpython_metadata"]
-packages = ["_dmPython_jdbc"]
+packages = ["_dmPython_jdbc", "_dmPython_jdbc.jdbc"]
 include-package-data = true
 
 [tool.setuptools.package-data]

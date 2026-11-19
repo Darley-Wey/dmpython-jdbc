@@ -14,6 +14,7 @@ import unittest
 from unittest.mock import Mock, patch
 
 import _dmPython_jdbc as shim
+from _dmPython_jdbc.jdbc.generated_keys import generated_key
 
 # The production dmPython loader selects JDBC on macOS. Use that same backend
 # on other test platforms without attempting to load the native Dameng driver.
@@ -323,19 +324,19 @@ class GeneratedKeyTests(unittest.TestCase):
             with self.subTest(values=values):
                 prepared = Mock()
                 prepared.getGeneratedKeys.return_value = keys = generated_keys("AUTO_GEN_KEY", values)
-                self.assertEqual(shim._generated_key(prepared), expected)
+                self.assertEqual(generated_key(prepared), expected)
                 keys.close.assert_called_once_with()
 
     def test_placeholder_rowid_is_not_a_key(self):
         prepared = Mock()
         prepared.getGeneratedKeys.return_value = generated_keys("ROWID", [0])
-        self.assertIsNone(shim._generated_key(prepared))
+        self.assertIsNone(generated_key(prepared))
 
     def test_unavailable_keys_are_not_an_error(self):
         prepared = Mock()
         prepared.getGeneratedKeys.side_effect = RuntimeError("driver refused")
-        self.assertIsNone(shim._generated_key(prepared))
-        self.assertIsNone(shim._generated_key(None))
+        self.assertIsNone(generated_key(prepared))
+        self.assertIsNone(generated_key(None))
 
     def cursor(self):
         """A shim cursor over the real jaydebeapi cursor and a mocked JDBC connection."""
