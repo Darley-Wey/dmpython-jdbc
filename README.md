@@ -29,21 +29,6 @@ dependencies = [
 
 如果项目还依赖 `dmSQLAlchemy`，见 [配合 dmSQLAlchemy](#配合-dmsqlalchemy)。该包会无条件拉取官方 `dmpython`。
 
-从 Git 安装：
-
-```bash
-pip install "dmpython-jdbc @ git+https://github.com/Darley-Wey/dmpython-jdbc.git"
-```
-
-uv：
-
-```toml
-[tool.uv.sources]
-dmpython-jdbc = { git = "https://github.com/Darley-Wey/dmpython-jdbc.git" }
-```
-
-需要钉到某个提交或 tag 时，在 URL 后加 `@<ref>`，例如 `@main` 或 `@v2.5.32`。
-
 ## 运行依赖
 
 - Python >= 3.12
