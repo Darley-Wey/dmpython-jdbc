@@ -1,5 +1,5 @@
 include README.md
-include README.zh-CN.md
+include README.en.md
 include LICENSE
 include NOTICE
 include pyproject.toml
